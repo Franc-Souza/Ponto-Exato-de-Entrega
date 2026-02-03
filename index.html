@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ponto Exato – Entregas</title>
+
+<link rel="manifest" href="manifest.json">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<style>
+body{margin:0;font-family:Arial;background:#f2f2f2}
+header{background:#0d47a1;color:#fff;padding:12px;text-align:center}
+#map{height:55vh}
+.controls{padding:10px;display:flex;flex-direction:column;gap:8px}
+.controls.compacto{flex-direction:row;flex-wrap:wrap}
+button,select{padding:12px;font-size:15px;border:none;border-radius:8px}
+.btn-primary{background:#1976d2;color:#fff}
+.btn-success{background:#2e7d32;color:#fff}
+.btn-orange{background:#ef6c00;color:#fff}
+.btn-gray{background:#616161;color:#fff}
+.entregas{background:#fff;max-height:30vh;overflow:auto;padding:10px}
+.entrega{border-bottom:1px solid #ddd;padding:6px;font-size:14px}
+.entrega.entregue{text-decoration:line-through;color:green}
+.modo{position:fixed;bottom:15px;right:15px}
+</style>
+</head>
+
+<body>
+
+<header>📦 Ponto Exato – Rota de Entregas</header>
+<div id="map"></div>
+
+<div class="controls" id="controls">
+  <button class="btn-primary" onclick="adicionarEntrega()">📍 Adicionar</button>
+  <button class="btn-primary" onclick="buscarEndereco()">🔎 Buscar</button>
+  <button class="btn-success" onclick="iniciarRota()">🚦 Iniciar rota</button>
+  <button class="btn-orange" onclick="proximaEntrega()">🚚 Próxima</button>
+  <button class="btn-primary" onclick="usarGPS()">📡 GPS</button>
+
+  <select id="transporte" onchange="alterarTransporte()">
+    <option value="carro">🚗 Carro</option>
+    <option value="moto">🏍 Moto</option>
+    <option value="bike">🚲 Bike</option>
+    <option value="pe">🚶 A pé</option>
+  </select>
+
+  <button class="btn-gray" onclick="limparRota()">🗑 Limpar tudo</button>
+</div>
+
+<div class="entregas" id="listaEntregas"></div>
+<button class="btn-gray modo" onclick="alternarModo()">🔄 Modo compacto</button>
+
+<script>
+// =================== MAPA ===================
+let map = L.map('map').setView([-15.7801,-47.9292],13);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+  attribution:'© OpenStreetMap'
+}).addTo(map);
+
+// =================== ESTADO ===================
+let entregas = JSON.parse(localStorage.getItem('rotaEntregas')) || [];
+let transporte = 'carro';
+let modoCompacto = false;
+let rotaLinha = null;
+let gpsMarker = null;
+let gpsWatch = null;
+
+// =================== VOZ ===================
+function falar(texto){
+  if(!('speechSynthesis' in window)) return;
+  let msg = new SpeechSynthesisUtterance(texto);
+  msg.lang = 'pt-BR';
+  speechSynthesis.cancel();
+  speechSynthesis.speak(msg);
+}
+
+// =================== PERSISTÊNCIA ===================
+function salvar(){
+  localStorage.setItem('rotaEntregas', JSON.stringify(entregas));
+}
+
+// =================== MARCADORES ===================
+function criarMarker(entrega){
+  entrega.marker = L.marker(entrega.latlng).addTo(map);
+  entrega.marker.on('click',()=>{
+    map.setView(entrega.latlng,18);
+  });
+}
+
+// =================== LISTA ===================
+function atualizarLista(){
+  let lista = document.getElementById('listaEntregas');
+  lista.innerHTML='';
+  entregas.forEach((e,i)=>{
+    let div=document.createElement('div');
+    div.className='entrega '+(e.status==='entregue'?'entregue':'');
+    div.innerHTML=`
+      ${i+1}. ${e.nome}<br>
+      <button onclick="marcarEntregue(${i})">✅</button>
+      <button onclick="desmarcar(${i})">🔄</button>
+      <button onclick="apagar(${i})">🗑</button>
+    `;
+    lista.appendChild(div);
+  });
+}
+
+// =================== ROTA ===================
+function desenharRota(){
+  if(rotaLinha){map.removeLayer(rotaLinha)}
+  let pontos = entregas.filter(e=>e.status==='pendente').map(e=>e.latlng);
+  if(pontos.length>1){
+    rotaLinha = L.polyline(pontos,{color:'blue'}).addTo(map);
+  }
+}
+
+// =================== ATUALIZA GERAL ===================
+function atualizarTudo(){
+  atualizarLista();
+  desenharRota();
+  salvar();
+}
+
+// =================== FUNÇÕES ===================
+async function buscarPorCEP() {
+  let cep = prompt("Digite o CEP (somente números):");
+  if (!cep) return;
+
+  cep = cep.replace(/\D/g, '');
+  if (cep.length !== 8) {
+    alert("CEP inválido");
+    return;
+  }
+
+  try {
+    // 1️⃣ Busca dados do CEP
+    let resCep = await fetch(`https://viacep.com.br/ws/${cep}/json/`);
+    let dadosCep = await resCep.json();
+
+    if (dadosCep.erro) {
+      alert("CEP não encontrado");
+      return;
+    }
+
+    let enderecoCompleto =
+      `${dadosCep.logradouro}, ${dadosCep.bairro}, ${dadosCep.localidade} - ${dadosCep.uf}`;
+
+    // 2️⃣ Converte endereço em coordenadas (OpenStreetMap)
+    let resGeo = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(enderecoCompleto)}`
+    );
+    let geo = await resGeo.json();
+
+    if (!geo.length) {
+      alert("Não foi possível localizar o endereço no mapa");
+      return;
+    }
+
+    let latlng = [parseFloat(geo[0].lat), parseFloat(geo[0].lon)];
+
+    // 3️⃣ Centraliza o mapa
+    map.setView(latlng, 18);
+
+    // 4️⃣ Pergunta se quer salvar como entrega
+    if (confirm(`Adicionar entrega em:\n${enderecoCompleto}?`)) {
+      let nome = prompt("Descrição da entrega:", enderecoCompleto);
+      if (!nome) return;
+
+      let entrega = {
+        nome,
+        latlng,
+        status: 'pendente'
+      };
+
+      entregas.push(entrega);
+      criarMarker(entrega, entregas.length - 1);
+      atualizarTudo();
+    }
+
+    // 🔊 Voz (se estiver usando)
+    if (typeof falar === 'function') {
+      falar("Endereço localizado pelo CEP");
+    }
+
+  } catch (e) {
+    alert("Erro ao buscar CEP. Verifique a internet.");
+  }
+}
+
+
+function adicionarEntrega(){
+  alert('Clique no mapa');
+  map.once('click',e=>{
+    let nome=prompt('Descrição');
+    if(!nome) return;
+    let ent={nome,latlng:e.latlng,status:'pendente'};
+    entregas.push(ent);
+    criarMarker(ent);
+    atualizarTudo();
+  });
+}
+
+async function buscarEndereco() {
+  let texto = prompt("Digite o endereço ou CEP:");
+  if (!texto) return;
+
+  texto = texto.trim();
+
+  // 🔎 Detecta CEP (8 números)
+  let cep = texto.replace(/\D/g, '');
+  if (cep.length === 8) {
+    return buscarPorCEPInterno(cep);
+  }
+
+  // 🔎 Caso seja endereço normal
+  try {
+    let res = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(texto)}`
+    );
+    let dados = await res.json();
+
+    if (!dados.length) {
+      alert("Endereço não encontrado");
+      return;
+    }
+
+    let latlng = [parseFloat(dados[0].lat), parseFloat(dados[0].lon)];
+    map.setView(latlng, 18);
+
+    if (confirm("Adicionar esse endereço como entrega?")) {
+      let nome = prompt("Descrição da entrega:", texto);
+      if (!nome) return;
+
+      let entrega = { nome, latlng, status: 'pendente' };
+      entregas.push(entrega);
+      criarMarker(entrega, entregas.length - 1);
+      atualizarTudo();
+    }
+
+    if (typeof falar === 'function') {
+      falar("Endereço localizado");
+    }
+
+  } catch {
+    alert("Erro ao buscar endereço");
+  }
+}
+
+async function buscarPorCEPInterno(cep) {
+  try {
+    let resCep = await fetch(`https://viacep.com.br/ws/${cep}/json/`);
+    let dadosCep = await resCep.json();
+
+    if (dadosCep.erro) {
+      alert("CEP não encontrado");
+      return;
+    }
+
+    let enderecoCompleto =
+      `${dadosCep.logradouro}, ${dadosCep.bairro}, ${dadosCep.localidade} - ${dadosCep.uf}`;
+
+    let resGeo = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(enderecoCompleto)}`
+    );
+    let geo = await resGeo.json();
+
+    if (!geo.length) {
+      alert("Local não encontrado no mapa");
+      return;
+    }
+
+    let latlng = [parseFloat(geo[0].lat), parseFloat(geo[0].lon)];
+    map.setView(latlng, 18);
+
+    if (confirm(`Adicionar entrega em:\n${enderecoCompleto}?`)) {
+      let nome = prompt("Descrição da entrega:", enderecoCompleto);
+      if (!nome) return;
+
+      let entrega = { nome, latlng, status: 'pendente' };
+      entregas.push(entrega);
+      criarMarker(entrega, entregas.length - 1);
+      atualizarTudo();
+    }
+
+    if (typeof falar === 'function') {
+      falar("Endereço localizado pelo CEP");
+    }
+
+  } catch {
+    alert("Erro ao buscar CEP");
+  }
+}
+
+function iniciarRota(){
+  let p=entregas.find(e=>e.status==='pendente');
+  if(!p) return alert('Nada pendente');
+  map.setView(p.latlng,zoom());
+  falar('Rota iniciada');
+}
+
+function proximaEntrega(){
+  let p=entregas.find(e=>e.status==='pendente');
+  if(!p){
+    falar('Todas entregas concluídas');
+    return;
+  }
+  map.setView(p.latlng,zoom());
+  falar('Próxima entrega');
+}
+
+function marcarEntregue(i){
+  entregas[i].status='entregue';
+  falar('Entrega concluída');
+  atualizarTudo();
+}
+
+function desmarcar(i){
+  entregas[i].status='pendente';
+  atualizarTudo();
+}
+
+function apagar(i){
+  map.removeLayer(entregas[i].marker);
+  entregas.splice(i,1);
+  atualizarTudo();
+}
+
+function limparRota(){
+  if(!confirm('Apagar tudo?')) return;
+  entregas.forEach(e=>map.removeLayer(e.marker));
+  entregas=[];
+  salvar();
+  atualizarLista();
+  if(rotaLinha){map.removeLayer(rotaLinha);rotaLinha=null}
+}
+
+function alterarTransporte(){
+  transporte=document.getElementById('transporte').value;
+}
+
+function zoom(){
+  return transporte==='pe'?18:transporte==='bike'?17:transporte==='moto'?16:15;
+}
+
+function alternarModo(){
+  modoCompacto=!modoCompacto;
+  document.getElementById('controls').classList.toggle('compacto');
+}
+
+
+
+// =================== GPS ===================
+function usarGPS(){
+  if(!navigator.geolocation) return alert('GPS não suportado');
+  if(gpsWatch) navigator.geolocation.clearWatch(gpsWatch);
+
+  gpsWatch = navigator.geolocation.watchPosition(pos=>{
+    let latlng=[pos.coords.latitude,pos.coords.longitude];
+    if(!gpsMarker){
+      gpsMarker=L.marker(latlng,{icon:L.icon({
+        iconUrl:'https://cdn-icons-png.flaticon.com/512/64/64113.png',
+        iconSize:[32,32]
+      })}).addTo(map);
+    } else {
+      gpsMarker.setLatLng(latlng);
+    }
+  },err=>alert('Erro GPS'),{enableHighAccuracy:true});
+  falar('GPS ativado');
+}
+
+// =================== INIT ===================
+entregas.forEach(e=>criarMarker(e));
+atualizarTudo();
+
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('service-worker.js');
+}
+</script>
+
+</body>
+</html>
