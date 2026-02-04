@@ -3,22 +3,23 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Ponto Exato – Navegação de Entregas</title>
+<title>Ponto Exato – Entregas</title>
 
-<link rel="manifest" href="manifest.json">
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
 <style>
 body{margin:0;font-family:Arial;background:#f2f2f2}
-header{background:#0d47a1;color:#fff;padding:12px;text-align:center}
-#map{height:60vh}
+header{background:#0d47a1;color:#fff;padding:10px;text-align:center}
+#map{height:55vh}
 .controls{padding:8px;display:flex;flex-wrap:wrap;gap:6px}
-button,select{padding:14px;font-size:16px;border:none;border-radius:10px}
+button,select{
+  padding:10px;font-size:14px;border:none;border-radius:8px
+}
 .btn{background:#1976d2;color:#fff}
-.btn-ok{background:#2e7d32}
-.btn-warn{background:#ef6c00}
-.btn-del{background:#616161}
+.btn.green{background:#2e7d32}
+.btn.orange{background:#ef6c00}
+.btn.gray{background:#616161}
 .entregas{background:#fff;max-height:30vh;overflow:auto;padding:8px}
 .entrega{border-bottom:1px solid #ddd;padding:6px;font-size:13px}
 .entrega.entregue{text-decoration:line-through;color:green}
@@ -27,29 +28,19 @@ button,select{padding:14px;font-size:16px;border:none;border-radius:10px}
 
 <body>
 
-<header>📦 Ponto Exato – Navegação</header>
+<header>📦 Ponto Exato – Rota de Entregas</header>
 
 <div id="map"></div>
 
 <div class="controls">
-  <button class="btn" onclick="adicionarEntrega()">📍 Adicionar</button>
+  <button class="btn" onclick="adicionarEntrega()">📍 Add</button>
   <button class="btn" onclick="buscarEndereco()">🔎 Buscar</button>
-  <button class="btn-ok" onclick="iniciarRota()">🚦 Iniciar</button>
-  <button class="btn-warn" onclick="proximaEntrega()">➡ Próxima</button>
+  <button class="btn green" onclick="proximaEntrega()">🚚 Próxima</button>
   <button class="btn" onclick="ativarGPS()">📡 GPS</button>
-
-  <select id="transporte" onchange="alterarTransporte()">
-    <option value="driving-car">🚗 Carro</option>
-    <option value="driving-motorcycle">🏍 Moto</option>
-    <option value="cycling-regular">🚲 Bike</option>
-    <option value="foot-walking">🚶 A pé</option>
-  </select>
-
-  <button class="btn-del" onclick="limparTudo()">🗑 Limpar</button>
+  <button class="btn gray" onclick="limparTudo()">🗑 Limpar</button>
 </div>
 
 <div class="entregas" id="lista"></div>
-
 <script>
   /* ====== BLOQUEIO POR DISPOSITIVO ====== */
   
@@ -64,9 +55,9 @@ button,select{padding:14px;font-size:16px;border:none;border-radius:10px}
   }
   
   // lista de dispositivos liberados (VOCÊ edita)
-  const DISPOSITIVOS_LIBERADOS = ["dev-urwizxgom"
+  const DISPOSITIVOS_LIBERADOS = [
     // EXEMPLO:
-    // "dev-zuibh78qj"
+    // "dev-ab123cd45"
   ];
   
   // verifica acesso
@@ -97,150 +88,163 @@ button,select{padding:14px;font-size:16px;border:none;border-radius:10px}
   </script>
   
 <script>
-  
-// ================= CONFIG =================
-const ORS_KEY = "eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImU3ZGJlNTI2MDgwMTRiZmZiYzFlOTBmMzJkZmIxNmRiIiwiaCI6Im11cm11cjY0In0="; // ← COLE AQUI
-const STORAGE_KEY = "ponto_exato_entregas";
+/* ================= CONFIG ================= */
+const ORS_KEY = "eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6ImU3ZGJlNTI2MDgwMTRiZmZiYzFlOTBmMzJkZmIxNmRiIiwiaCI6Im11cm11cjY0In0=";
 
-// ================= MAPA =================
-let map = L.map('map');
+/* ================= MAPA ================= */
+const map = L.map('map').setView([-15.7801,-47.9292],13);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
   attribution:'© OpenStreetMap'
 }).addTo(map);
 
-// ================= ESTADO =================
-let entregas = JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
+/* ================= ESTADO ================= */
+let entregas = JSON.parse(localStorage.getItem('entregas')) || [];
 let rotaLinha = null;
 let gpsMarker = null;
-let gpsWatch = null;
-let transporte = 'driving-car';
 
-// ================= VOZ =================
-function falar(texto){
-  let msg = new SpeechSynthesisUtterance(texto);
-  msg.lang = "pt-BR";
+/* ================= VOZ ================= */
+function falar(txt){
+  if(!('speechSynthesis' in window)) return;
+  const m = new SpeechSynthesisUtterance(txt);
+  m.lang = 'pt-BR';
   speechSynthesis.cancel();
-  speechSynthesis.speak(msg);
+  speechSynthesis.speak(m);
 }
 
-// ================= STORAGE =================
+/* ================= PERSISTÊNCIA ================= */
 function salvar(){
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(entregas));
+  localStorage.setItem('entregas',JSON.stringify(entregas));
 }
 
-// ================= MARKERS =================
+/* ================= MARKERS ================= */
 function criarMarker(e){
   e.marker = L.marker(e.latlng).addTo(map);
-  e.marker.on('click',()=>{
-    map.setView(e.latlng,18);
-  });
 }
 
-// ================= LISTA =================
+/* ================= LISTA ================= */
 function atualizarLista(){
-  let lista = document.getElementById('lista');
-  lista.innerHTML = "";
+  const div = document.getElementById('lista');
+  div.innerHTML='';
   entregas.forEach((e,i)=>{
-    let d = document.createElement('div');
-    d.className = "entrega " + (e.status==="entregue"?"entregue":"");
-    d.innerHTML = `
+    const d=document.createElement('div');
+    d.className='entrega '+(e.status==='entregue'?'entregue':'');
+    d.innerHTML=`
       ${i+1}. ${e.nome}<br>
-      <button onclick="entregue(${i})">✅</button>
-      <button onclick="desmarcar(${i})">🔄</button>
+      <button onclick="entregar(${i})">✅</button>
       <button onclick="apagar(${i})">🗑</button>
     `;
-    lista.appendChild(d);
+    div.appendChild(d);
   });
 }
 
-// ================= ROTA =================
-async function desenharRota(destino){
-  if(!gpsMarker) return;
+/* ================= ADD ENTREGA ================= */
+function adicionarEntrega(){
+  alert('Clique no mapa');
+  map.once('click',e=>{
+    const nome = prompt('Descrição da entrega');
+    if(!nome) return;
+    const ent = {nome,latlng:e.latlng,status:'pendente'};
+    entregas.push(ent);
+    criarMarker(ent);
+    salvar();
+    atualizarLista();
+  });
+}
 
-  if(rotaLinha){
-    map.removeLayer(rotaLinha);
-    rotaLinha = null;
+/* ================= BUSCAR ================= */
+async function buscarEndereco(){
+  const q = prompt('Digite endereço ou CEP');
+  if(!q) return;
+
+  let url = q.replace(/\D/g,'').length===8
+    ? `https://viacep.com.br/ws/${q}/json/`
+    : `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}`;
+
+  const r = await fetch(url);
+  const d = await r.json();
+
+  let texto = q;
+  if(d.logradouro){
+    texto = `${d.logradouro}, ${d.localidade}-${d.uf}`;
   }
 
-  let origem = gpsMarker.getLatLng();
+  const geo = await fetch(
+    `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(texto)}`
+  ).then(r=>r.json());
 
-  let res = await fetch("https://api.openrouteservice.org/v2/directions/"+transporte,{
-    method:"POST",
-    headers:{
-      "Authorization":ORS_KEY,
-      "Content-Type":"application/json"
-    },
-    body:JSON.stringify({
-      coordinates:[
-        [origem.lng, origem.lat],
-        [destino.lng, destino.lat]
-      ]
-    })
-  });
+  if(!geo.length) return alert('Não encontrado');
 
-  let data = await res.json();
-  let coords = data.features[0].geometry.coordinates.map(c=>[c[1],c[0]]);
+  const latlng=[+geo[0].lat,+geo[0].lon];
+  map.setView(latlng,18);
 
-  rotaLinha = L.polyline(coords,{color:'blue',weight:5}).addTo(map);
+  if(confirm('Adicionar entrega aqui?')){
+    const ent={nome:texto,latlng,status:'pendente'};
+    entregas.push(ent);
+    criarMarker(ent);
+    salvar();
+    atualizarLista();
+  }
 }
 
-// ================= GPS =================
+/* ================= GPS ================= */
 function ativarGPS(){
-  if(!navigator.geolocation) return alert("GPS não suportado");
+  if(!navigator.geolocation) return alert('GPS não suportado');
 
-  if(gpsWatch) navigator.geolocation.clearWatch(gpsWatch);
-
-  const gpsIcon = L.divIcon({
-    className: '',
-    html: '<div style="width:16px;height:16px;background:#000;border-radius:50%;border:2px solid #fff"></div>',
-    iconSize: [16,16],
-    iconAnchor: [8,8]
-  });
-
-  gpsWatch = navigator.geolocation.watchPosition(pos=>{
-    let latlng = [pos.coords.latitude, pos.coords.longitude];
-
+  navigator.geolocation.watchPosition(p=>{
+    const latlng=[p.coords.latitude,p.coords.longitude];
     if(!gpsMarker){
-      gpsMarker = L.marker(latlng,{icon:gpsIcon}).addTo(map);
-    }else{
+      gpsMarker=L.circleMarker(latlng,{
+        radius:8,color:'black',fillColor:'black',fillOpacity:1
+      }).addTo(map);
+    } else {
       gpsMarker.setLatLng(latlng);
     }
+  },()=>alert('Erro GPS'),{enableHighAccuracy:true});
 
-    map.setView(latlng,17);
-
-  }, err => alert("Erro ao obter GPS"), {
-    enableHighAccuracy:true,
-    maximumAge:1000
-  });
-
-  falar("GPS ativado");
+  falar('GPS ativado');
 }
 
+/* ================= ROTA ORS ================= */
+async function rotaPara(dest){
+  if(!gpsMarker) return alert('Ative o GPS');
 
-// ================= FLUXO =================
-function iniciarRota(){
-  let prox = entregas.find(e=>e.status==="pendente");
-  if(!prox) return alert("Nenhuma entrega pendente");
+  const o = gpsMarker.getLatLng();
 
-  desenharRota(L.latLng(prox.latlng));
-  falar("Rota iniciada");
+  const r = await fetch(
+    "https://api.openrouteservice.org/v2/directions/driving-car",
+    {
+      method:"POST",
+      headers:{
+        "Authorization":ORS_KEY,
+        "Content-Type":"application/json"
+      },
+      body:JSON.stringify({
+        coordinates:[
+          [o.lng,o.lat],
+          [dest.lng,dest.lat]
+        ]
+      })
+    }
+  );
+
+  const d = await r.json();
+  const pts = d.features[0].geometry.coordinates.map(c=>[c[1],c[0]]);
+
+  if(rotaLinha) map.removeLayer(rotaLinha);
+  rotaLinha = L.polyline(pts,{color:'blue',weight:6}).addTo(map);
 }
 
-function proximaEntrega(){
-  iniciarRota();
-  falar("Próxima entrega");
+/* ================= PRÓXIMA ================= */
+async function proximaEntrega(){
+  const p = entregas.find(e=>e.status==='pendente');
+  if(!p) return falar('Todas entregas concluídas');
+  await rotaPara({lat:p.latlng.lat,lng:p.latlng.lng});
+  falar('Rota traçada');
 }
 
-function entregue(i){
-  entregas[i].status="entregue";
-  salvar();
-  atualizarLista();
-  iniciarRota();
-  falar("Entrega concluída");
-}
-
-function desmarcar(i){
-  entregas[i].status="pendente";
+/* ================= STATUS ================= */
+function entregar(i){
+  entregas[i].status='entregue';
   salvar();
   atualizarLista();
 }
@@ -250,61 +254,10 @@ function apagar(i){
   entregas.splice(i,1);
   salvar();
   atualizarLista();
-  iniciarRota();
 }
-
-// ================= AÇÕES =================
-function adicionarEntrega(){
-  alert("Clique no mapa");
-  map.once('click',e=>{
-    let nome = prompt("Descrição");
-    if(!nome) return;
-    let ent={nome,latlng:e.latlng,status:"pendente"};
-    entregas.push(ent);
-    criarMarker(ent);
-    salvar();
-    atualizarLista();
-  });
-}
-
-async function buscarEndereco(){
-  let texto = prompt("Digite o endereço ou CEP:");
-  if(!texto) return;
-
-  let cep = texto.replace(/\D/g,'');
-  let query = texto;
-
-  // Se for CEP
-  if(cep.length === 8){
-    let rCep = await fetch(`https://viacep.com.br/ws/${cep}/json/`);
-    let dCep = await rCep.json();
-    if(dCep.erro) return alert("CEP não encontrado");
-
-    query = `${dCep.logradouro}, ${dCep.localidade} - ${dCep.uf}`;
-  }
-
-  let r = await fetch(
-    `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(query)}`
-  );
-  let d = await r.json();
-  if(!d.length) return alert("Local não encontrado");
-
-  let latlng = [parseFloat(d[0].lat), parseFloat(d[0].lon)];
-  map.setView(latlng,18);
-
-  if(confirm("Adicionar entrega aqui?")){
-    let ent = { nome: query, latlng, status:"pendente" };
-    entregas.push(ent);
-    criarMarker(ent);
-    salvar();
-    atualizarLista();
-    falar("Entrega adicionada");
-  }
-}
-
 
 function limparTudo(){
-  if(!confirm("Apagar tudo?")) return;
+  if(!confirm('Apagar tudo?')) return;
   entregas.forEach(e=>map.removeLayer(e.marker));
   entregas=[];
   salvar();
@@ -312,14 +265,12 @@ function limparTudo(){
   if(rotaLinha) map.removeLayer(rotaLinha);
 }
 
-// ================= INIT =================
-entregas.forEach(criarMarker);
-atualizarLista();
-ativarGPS();
-
-if('serviceWorker' in navigator){
-  navigator.serviceWorker.register('service-worker.js');
-}
+/* ================= INIT ÚNICO ================= */
+window.addEventListener('load',()=>{
+  entregas.forEach(criarMarker);
+  atualizarLista();
+  setTimeout(()=>map.invalidateSize(),500);
+});
 </script>
 
 </body>
