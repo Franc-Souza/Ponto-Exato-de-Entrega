@@ -53,6 +53,7 @@ button {
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
+
 <script>
 /* ================= MAPA ================= */
 let map = L.map('map').setView([-15.78, -47.93], 4);
@@ -86,13 +87,37 @@ function falar(txt){
   let msg = new SpeechSynthesisUtterance(txt);
   msg.lang = 'pt-BR';
   speechSynthesis.speak(msg);
+  
+  let avisouChegada = false;
+
+function falar(texto){
+  const msg = new SpeechSynthesisUtterance(texto);
+  msg.lang = 'pt-BR';
+  speechSynthesis.speak(msg);
 }
+
+}
+
+/* ================= FALAR DISTÂNCIA ================= */
+
+function falarDistancia(){
+  if(!gpsLatLng || !entregaSelecionada) return;
+
+  let d = map.distance(gpsLatLng, entregaSelecionada.latlng);
+
+  if(!ultimaDist || Math.abs(ultimaDist - d) > 100){
+    ultimaDist = d;
+    falar(`Faltam ${Math.round(d)} metros`);
+  }
+}
+
 
 /* ================= ESTADO ================= */
 let entregas = JSON.parse(localStorage.getItem('entregas')) || [];
 let markers = [];
 let rotaLinha = null;
 let gpsMarker = null;
+let ultimaDist = null;
 
 /* ================= SALVAR ================= */
 function salvar(){
@@ -187,7 +212,16 @@ function atualizarRotaGPS(){
     [gpsLatLng, entregaSelecionada.latlng],
     { color:'blue', weight:5 }
   ).addTo(map);
+  // AVISO DE CHEGADA
+let distancia = map.distance(gpsLatLng, destino);
+
+if(distancia < 50 && !avisouChegada){
+  falar('Você está chegando ao local da entrega');
+  avisouChegada = true;
 }
+
+}
+
 
 
 /* ================= CEP ================= */
