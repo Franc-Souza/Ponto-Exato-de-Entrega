@@ -53,7 +53,6 @@ button {
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-
 <script>
   /* ====== BLOQUEIO POR DISPOSITIVO ====== */
   
@@ -100,6 +99,7 @@ button {
   })();
   </script>
   
+
 <script>
 /* ================= MAPA ================= */
 let map = L.map('map').setView([-15.78, -47.93], 4);
@@ -140,7 +140,14 @@ function falar(texto){
   const msg = new SpeechSynthesisUtterance(texto);
   msg.lang = 'pt-BR';
   speechSynthesis.speak(msg);
+  }
+
 }
+
+function vibrar(ms){
+  if(navigator.vibrate){
+    navigator.vibrate(ms);
+  }
 
 }
 
@@ -261,13 +268,26 @@ function atualizarRotaGPS(){
   // AVISO DE CHEGADA
 let distancia = map.distance(gpsLatLng, destino);
 
-if(distancia < 50 && !avisouChegada){
-  falar('Você está chegando ao local da entrega');
-  avisouChegada = true;
+if(distancia < 200 && !avisou200){
+  falar('Faltam duzentos metros');
+  vibrar(200);
+  avisou200 = true;
+}
+
+
+if(distancia < 100 && !avisou100){
+  falar('Faltam cem metros');
+  vibrar([100,50,100]);
+  avisou100 = true;
+}
+
+if(distancia < 50 && !avisou50){
+  falar('Você está chegando ao local');
+  vibrar([300,100,300]);
+  avisou50 = true;
 }
 
 }
-
 
 
 /* ================= CEP ================= */
