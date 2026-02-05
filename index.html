@@ -55,6 +55,52 @@ button {
 
 
 <script>
+  /* ====== BLOQUEIO POR DISPOSITIVO ====== */
+  
+  // gera ou recupera ID único do dispositivo
+  function getDeviceId(){
+    let id = localStorage.getItem("device_id");
+    if(!id){
+      id = 'dev-' + Math.random().toString(36).substr(2,9);
+      localStorage.setItem("device_id", id);
+    }
+    return id;
+  }
+  
+  // lista de dispositivos liberados (VOCÊ edita)
+  const DISPOSITIVOS_LIBERADOS = [
+    // EXEMPLO:
+    // "dev-ab123cd45"
+  ];
+  
+  // verifica acesso
+  (function verificarAcesso(){
+    const id = getDeviceId();
+  
+    if(!DISPOSITIVOS_LIBERADOS.includes(id)){
+      document.body.innerHTML = `
+        <div style="
+          height:100vh;
+          display:flex;
+          flex-direction:column;
+          align-items:center;
+          justify-content:center;
+          font-family:Arial;
+          text-align:center;
+          background:#f2f2f2;
+        ">
+          <h2>🔒 Acesso bloqueado</h2>
+          <p>Este aplicativo está vinculado a um único dispositivo.</p>
+          <p><strong>ID do dispositivo:</strong><br>${id}</p>
+          <p>Envie este código para liberação.</p>
+        </div>
+      `;
+      throw new Error("Dispositivo não autorizado");
+    }
+  })();
+  </script>
+  
+<script>
 /* ================= MAPA ================= */
 let map = L.map('map').setView([-15.78, -47.93], 4);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
